@@ -148,13 +148,10 @@ class TfidfChineseMahjongQA:
 
 @st.cache_resource
 def load_models():
-    # 1. Load English Model (spaCy)
-    # 'en_core_web_md' provides good word vectors.
-    nlp_en = spacy.load("en_core_web_md")
+    nlp_en = spacy.load("en_core_web_sm")
     kb_vecs_en = build_kb_vectors_en(KNOWLEDGE_BASE, nlp_en)
     qa_en = SpacyEnglishMahjongQA(KNOWLEDGE_BASE, nlp_en, kb_vecs_en)
 
-    # 2. Load Chinese Model (TF-IDF)
     vectorizer_zh, doc_matrix_zh = build_tfidf_zh(KNOWLEDGE_BASE)
     qa_zh = TfidfChineseMahjongQA(KNOWLEDGE_BASE, vectorizer_zh, doc_matrix_zh)
 
