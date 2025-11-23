@@ -1,7 +1,5 @@
 import random
 import numpy as np
-from numpy.linalg import norm
-import spacy
 import streamlit as st
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
@@ -10,22 +8,6 @@ from mahjong_kb import KNOWLEDGE_BASE
 
 
 # 1. UTILITY FUNCTIONS
-# handle vector math and text preparation.
-
-def cosine_sim(a: np.ndarray, b: np.ndarray) -> float:
-    """
-    Calculates cosine similarity between two vectors (a and b).
-    Used for comparing query vectors with knowledge base vectors.
-    """
-    if a is None or b is None:
-        return 0.0
-    na = norm(a)
-    nb = norm(b)
-    if na == 0 or nb == 0:
-        return 0.0
-    return float(np.dot(a, b) / (na * nb))
-
-
 def build_doc_text(entry, lang: str = "en") -> str:
     """
     Combines all text fields of a rule entry into a single string, then turned into a vector for semantic search.
@@ -42,18 +24,20 @@ def build_doc_text(entry, lang: str = "en") -> str:
     return text
 
 
-def build_kb_vectors_en(kb, nlp_en):
+def build_tfidf_en(kb):
     """
-    Pre-computes vectors for all English rules using spaCy.
-    Returns:
-      - vectors: numpy array of shape (N_rules, vector_dim)
+    Builds a TF-IDF model for English rules using word-level n-grams.
+    Returns the fitted vectorizer and the sparse matrix of rule vectors.
     """
-    vectors = []
-    for entry in kb:
-        doc_text = build_doc_text(entry, lang="en")
-        doc = nlp_en(doc_text)
-        vectors.append(doc.vector)
-    return np.vstack(vectors)
+    corpus = [build_doc_text(entry, lang="en") for entry in kb]
+    vectorizer = TfidfVectorizer(
+        analyzer="word",
+        ngram_range=(1, 2),
+        stop_words="english",
+        min_df=1
+    )
+    doc_matrix = vectorizer.fit_transform(corpus)
+    return vectorizer, doc_matrix
 
 
 def build_tfidf_zh(kb):
@@ -76,31 +60,22 @@ def build_tfidf_zh(kb):
 
 # 2. encapsulate the search logic for each language.
 
-class SpacyEnglishMahjongQA:
+class TfidfEnglishMahjongQA:
     """
-    English QA Engine using spaCy embeddings.
-    Matches user queries to rules based on semantic meaning.
+    English QA Engine using TF-IDF + Cosine Similarity on word n-grams.
+    Emphasizes literal question overlap for clearer matches.
     """
-    def __init__(self, kb, nlp_en, kb_vecs_en):
+    def __init__(self, kb, vectorizer_en, doc_matrix_en):
         self.kb = kb
-        self.nlp_en = nlp_en
-        self.kb_vecs_en = kb_vecs_en
+        self.vectorizer_en = vectorizer_en
+        self.doc_matrix_en = doc_matrix_en
 
     def retrieve(self, query: str, top_k: int = 3):
-        # Convert user query to vector
-        doc = self.nlp_en(query)
-        q_vec = doc.vector
+        q_vec = self.vectorizer_en.transform([query])
+        sims = cosine_similarity(q_vec, self.doc_matrix_en)[0]
 
-        # Compare against all rule vectors
-        sims = []
-        for vec in self.kb_vecs_en:
-            sims.append(cosine_sim(q_vec, vec))
-        sims = np.array(sims)
-
-        # Sort by similarity (descending)
         top_idx = np.argsort(sims)[::-1][:top_k]
         
-        # Format results
         results = []
         for idx in top_idx:
             entry = self.kb[idx]
@@ -148,9 +123,8 @@ class TfidfChineseMahjongQA:
 
 @st.cache_resource
 def load_models():
-    nlp_en = spacy.load("en_core_web_sm")
-    kb_vecs_en = build_kb_vectors_en(KNOWLEDGE_BASE, nlp_en)
-    qa_en = SpacyEnglishMahjongQA(KNOWLEDGE_BASE, nlp_en, kb_vecs_en)
+    vectorizer_en, doc_matrix_en = build_tfidf_en(KNOWLEDGE_BASE)
+    qa_en = TfidfEnglishMahjongQA(KNOWLEDGE_BASE, vectorizer_en, doc_matrix_en)
 
     vectorizer_zh, doc_matrix_zh = build_tfidf_zh(KNOWLEDGE_BASE)
     qa_zh = TfidfChineseMahjongQA(KNOWLEDGE_BASE, vectorizer_zh, doc_matrix_zh)
